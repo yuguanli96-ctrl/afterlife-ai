@@ -1,102 +1,73 @@
-import 'dart:convert';
 import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import '../utils/env_config.dart';
+
 import '../utils/app_logger.dart';
+import '../utils/env_config.dart';
 import 'base_service.dart';
 
 enum ChatContext { general, character, interview }
 
+/// First-phase DeepSeek integration for Afterlife.
+///
+/// IMPORTANT: This is a *personal testing / bring-your-own-key* adapter.
+/// It temporarily reads the DeepSeek API key from the EXISTING Settings key
+/// field (which is still named OPENROUTER_API_KEY in EnvConfig).
+/// Do not publish a shared API key in a Flutter web build or Android APK.
+/// For public/multi-user deployment, move requests to an authenticated backend.
 class UnifiedChatService {
-  static const String _openRouterUrl =
-      'https://openrouter.ai/api/v1/chat/completions';
+  static const String _deepSeekUrl =
+      'https://api.deepseek.com/chat/completions';
   static const Duration _requestTimeout = Duration(seconds: 120);
 
-  // Default models per context (updated to newest OpenRouter models)
-  static const String _defaultGeneralModel = 'anthropic/claude-sonnet-4.5';
-  static const String _defaultCharacterModel = 'anthropic/claude-sonnet-4.5';
-  static const String _defaultInterviewModel = 'google/gemini-2.5-pro';
+  static const String _defaultGeneralModel = 'deepseek-flash';
+  static const String _defaultCharacterModel = 'deepseek-flash';
+  static const String _defaultInterviewModel = 'deepseek-flash';
 
   static const double _defaultTemperature = 0.7;
-  static const int _defaultMaxTokens = 25000;
+  static const int _defaultMaxTokens = 4096;
 
   static bool _isInitialized = false;
   static String? _apiKey;
   static bool _isUsingDefaultKey = false;
 
-  // Initialize the service
   static Future<void> initialize() async {
     await StaticServiceInitializer.initializeService(
       serviceName: 'UnifiedChatService',
       isInitialized: () => _isInitialized,
       markInitialized: () => _isInitialized = true,
-      dependencies: [
-        () => EnvConfig.initialize(),
-      ],
+      dependencies: [() => EnvConfig.initialize()],
       initializeLogic: () async {
-        // Get API key from environment
-        _apiKey = EnvConfig.get('OPENROUTER_API_KEY');
-
-        // Check if we're using a default key or a user key
-        _isUsingDefaultKey = !(await EnvConfig.hasUserApiKey());
-
-        if (_apiKey == null || _apiKey!.isEmpty) {
-          if (kDebugMode) {
-            AppLogger.warning(
-              'No OpenRouter API key found - application will not function properly',
-              tag: 'UnifiedChatService'
-            );
-            AppLogger.info(
-              'Please set OPENROUTER_API_KEY in your .env file or in Settings',
-              tag: 'UnifiedChatService'
-            );
-          }
-        } else {
-          if (kDebugMode) {
-            AppLogger.debug(
-              'Using ${_isUsingDefaultKey ? 'default' : 'user\'s'} API key',
-              tag: 'UnifiedChatService'
-            );
-          }
+        await refreshApiKey();
+        if ((_apiKey == null || _apiKey!.isEmpty) && kDebugMode) {
+          AppLogger.warning(
+            'No DeepSeek API key: enter your own key in the existing API key field in Settings.',
+            tag: 'UnifiedChatService',
+          );
         }
       },
     );
   }
 
-  // Method to refresh API key from the latest source
   static Future<void> refreshApiKey() async {
     try {
-      if (kDebugMode) {
-        AppLogger.debug('Refreshing API key', tag: 'UnifiedChatService');
-      }
-
-      // Get the latest key directly
-      _apiKey = EnvConfig.get('OPENROUTER_API_KEY');
-
-      // Check if we're using a default key or a user key
+      // Compatibility bridge: existing Settings UI saves into this key.
+      // It must contain a DEEPSEEK API key, not an OpenRouter key.
+      _apiKey = EnvConfig.get('OPENROUTER_API_KEY')?.trim();
       _isUsingDefaultKey = !(await EnvConfig.hasUserApiKey());
-
-      if (_apiKey == null || _apiKey!.isEmpty) {
-        if (kDebugMode) {
-          AppLogger.warning('No API key found after refresh', tag: 'UnifiedChatService');
-        }
-      } else {
-        if (kDebugMode) {
-          AppLogger.debug(
-            'API key refreshed successfully - Using ${_isUsingDefaultKey ? 'default' : 'user\'s'} key',
-            tag: 'UnifiedChatService'
-          );
-        }
-      }
     } catch (e) {
       if (kDebugMode) {
-        AppLogger.error('Error refreshing API key', tag: 'UnifiedChatService', error: e);
+        AppLogger.error(
+          'Failed to refresh API key',
+          tag: 'UnifiedChatService',
+          error: e,
+        );
       }
     }
   }
 
-  // Unified send message method that routes based on context
   static Future<String?> sendMessage({
     required ChatContext context,
     String? message,
@@ -108,126 +79,79 @@ class UnifiedChatService {
     double? temperature,
     int? maxTokens,
   }) async {
-    if (!_isInitialized) {
-      await initialize();
-    }
-
-    // Always refresh the API key before sending a message
-    await refreshApiKey();
-
-    // Validate API key
-    if (_apiKey == null || _apiKey!.isEmpty) {
-      if (kDebugMode) {
-        AppLogger.error('API key is missing - cannot send message', tag: 'UnifiedChatService');
-      }
-      return 'Error: No API key configured. Please add your OpenRouter API key in Settings to use AI features.';
-    }
-
-    // Additional validation for API key format
-    if (!_isValidApiKeyFormat(_apiKey!)) {
-      if (kDebugMode) {
-        AppLogger.error('API key format appears invalid', tag: 'UnifiedChatService');
-      }
-      return 'Error: API key format appears invalid. Please check your OpenRouter API key in Settings.';
-    }
-
     try {
-      // Route to appropriate handler based on context
+      if (!_isInitialized) await initialize();
+      await refreshApiKey();
+
+      if (_apiKey == null || _apiKey!.isEmpty) {
+        return 'Error: No DeepSeek API key configured. Enter your DeepSeek key in the existing API key field in Settings.';
+      }
+      if (!_isValidDeepSeekApiKeyFormat(_apiKey!)) {
+        return 'Error: This is not a valid-looking DeepSeek API key. Do not use an OpenRouter key; enter a DeepSeek key in Settings.';
+      }
+
       switch (context) {
         case ChatContext.general:
+          if (message == null) return 'Error: Missing message.';
           return await _sendGeneralMessage(
-            message: message!,
+            message: message,
             history: history ?? [],
             systemPrompt: systemPrompt,
             model: model,
           );
         case ChatContext.character:
+          if (message == null || systemPrompt == null || characterId == null) {
+            return 'Error: Missing character conversation information.';
+          }
           return await _sendCharacterMessage(
-            characterId: characterId!,
-            message: message!,
-            systemPrompt: systemPrompt!,
+            characterId: characterId,
+            message: message,
+            systemPrompt: systemPrompt,
             chatHistory: history ?? [],
             model: model,
           );
         case ChatContext.interview:
+          if (messages == null) return 'Error: Missing interview messages.';
           return await _sendInterviewMessage(
-            messages: messages!,
+            messages: messages,
             systemPrompt: systemPrompt,
             model: model,
             temperature: temperature,
             maxTokens: maxTokens,
           );
       }
-    } catch (e, s) {
+    } catch (e) {
       if (kDebugMode) {
-        print('Error in unified chat service: $e');
-        print(s);
+        AppLogger.error(
+          'Failed to send chat message',
+          tag: 'UnifiedChatService',
+          error: e,
+        );
       }
-      return 'I apologize, but I encountered an issue connecting to my servers. Please try again in a moment.';
+      return 'Error: Unable to connect to DeepSeek. Please try again.';
     }
   }
 
-  // Internal method for general chat flow
   static Future<String?> _sendGeneralMessage({
     required String message,
     required List<Map<String, dynamic>> history,
     String? systemPrompt,
     String? model,
   }) async {
-    try {
-      // Prepare the request payload
-      final List<Map<String, dynamic>> messages = [];
-
-      // Add system prompt if provided
-      if (systemPrompt != null && systemPrompt.isNotEmpty) {
-        messages.add({'role': 'system', 'content': systemPrompt});
-      }
-
-      // Add chat history with proper role fields
-      for (final msg in history) {
-        // Make a copy of the message to avoid modifying the original
-        final Map<String, dynamic> formattedMsg = Map.from(msg);
-
-        // Ensure the message has a role field
-        if (!formattedMsg.containsKey('role')) {
-          // If it has an 'isUser' field, use that to determine role
-          if (formattedMsg.containsKey('isUser')) {
-            formattedMsg['role'] =
-                formattedMsg['isUser'] == true ? 'user' : 'assistant';
-          } else {
-            // Default to 'user' if we can't determine
-            formattedMsg['role'] = 'user';
-          }
-        }
-
-        messages.add({
-          'role': formattedMsg['role'],
-          'content': formattedMsg['content'],
-        });
-      }
-
-      // Add the new user message
-      messages.add({'role': 'user', 'content': message});
-
-      // Create the request body
-      final body = {
-        'model': model ?? _defaultGeneralModel,
-        'messages': messages,
-        'temperature': _defaultTemperature,
-        'max_tokens': _defaultMaxTokens,
-      };
-
-      return await _makeApiRequest(body, 'providers');
-    } catch (e, s) {
-      if (kDebugMode) {
-        print('Error in general message flow: $e');
-        print(s);
-      }
-      return 'I apologize, but I encountered an issue connecting to my servers. Please try again in a moment.';
-    }
+    return _makeApiRequest(
+      _createBody(
+        model: _resolveModel(model, _defaultGeneralModel),
+        messages: [
+          if (systemPrompt != null && systemPrompt.isNotEmpty)
+            {'role': 'system', 'content': systemPrompt},
+          ..._formatHistory(history),
+          {'role': 'user', 'content': message},
+        ],
+      ),
+      'general_chat',
+    );
   }
 
-  // Internal method for character chat flow
   static Future<String?> _sendCharacterMessage({
     required String characterId,
     required String message,
@@ -235,45 +159,21 @@ class UnifiedChatService {
     required List<Map<String, dynamic>> chatHistory,
     String? model,
   }) async {
-    try {
-      // Prepare request body
-      final body = {
-        'model': model ?? _defaultCharacterModel,
-        'messages': [
+    // The characterId remains part of the public API; the original service
+    // also passed the personality through systemPrompt rather than characterId.
+    return _makeApiRequest(
+      _createBody(
+        model: _resolveModel(model, _defaultCharacterModel),
+        messages: [
           {'role': 'system', 'content': systemPrompt},
-          ...chatHistory.map((msg) {
-            // Ensure each message has a proper role field
-            if (msg.containsKey('role')) {
-              return {'role': msg['role'], 'content': msg['content']};
-            } else if (msg.containsKey('isUser')) {
-              return {
-                'role': msg['isUser'] == true ? 'user' : 'assistant',
-                'content': msg['content'],
-              };
-            } else {
-              return {
-                'role': 'user', // Default to user
-                'content': msg['content'],
-              };
-            }
-          }),
+          ..._formatHistory(chatHistory),
           {'role': 'user', 'content': message},
         ],
-        'temperature': _defaultTemperature,
-        'max_tokens': _defaultMaxTokens,
-      };
-
-      return await _makeApiRequest(body, 'character_chat');
-    } catch (e, s) {
-      if (kDebugMode) {
-        print('Error in character message flow: $e');
-        print(s);
-      }
-      return 'I apologize, but I encountered an issue connecting to my servers. Please try again in a moment.';
-    }
+      ),
+      'character_chat',
+    );
   }
 
-  // Internal method for interview chat flow
   static Future<String?> _sendInterviewMessage({
     required List<Map<String, dynamic>> messages,
     String? systemPrompt,
@@ -281,172 +181,172 @@ class UnifiedChatService {
     double? temperature,
     int? maxTokens,
   }) async {
-    try {
-      final messagesList = <Map<String, dynamic>>[];
-
-      if (systemPrompt?.isNotEmpty ?? false) {
-        messagesList.add({'role': 'system', 'content': systemPrompt});
-      }
-
-      // Ensure each message has a valid 'role' field
-      for (final msg in messages) {
-        // Make a copy of the message to avoid modifying the original
-        final Map<String, dynamic> formattedMsg = Map.from(msg);
-
-        // Ensure the message has a role field
-        if (!formattedMsg.containsKey('role')) {
-          // If it has an 'isUser' field, use that to determine role
-          if (formattedMsg.containsKey('isUser')) {
-            formattedMsg['role'] =
-                formattedMsg['isUser'] == true ? 'user' : 'assistant';
-          } else {
-            // Default to 'user' if we can't determine
-            formattedMsg['role'] = 'user';
-          }
-        }
-
-        messagesList.add(formattedMsg);
-      }
-
-      final body = {
-        'model': model ?? _defaultInterviewModel,
-        'messages': messagesList,
-        'temperature': temperature ?? _defaultTemperature,
-        'max_tokens': maxTokens ?? _defaultMaxTokens,
-      };
-
-      return await _makeApiRequest(body, 'character_interview');
-    } catch (e, s) {
-      if (kDebugMode) {
-        print('Error in interview message flow: $e');
-        print(s);
-      }
-      return 'I apologize, but I encountered an issue connecting to my servers. Please try again in a moment.';
-    }
+    return _makeApiRequest(
+      _createBody(
+        model: _resolveModel(model, _defaultInterviewModel),
+        messages: [
+          if (systemPrompt != null && systemPrompt.isNotEmpty)
+            {'role': 'system', 'content': systemPrompt},
+          ..._formatHistory(messages),
+        ],
+        temperature: temperature,
+        maxTokens: maxTokens,
+      ),
+      'character_interview',
+    );
   }
 
-  // Shared API request method
+  static Map<String, dynamic> _createBody({
+    required String model,
+    required List<Map<String, String>> messages,
+    double? temperature,
+    int? maxTokens,
+  }) {
+    final requestedTokens = maxTokens ?? _defaultMaxTokens;
+    return {
+      'model': model,
+      'messages': messages,
+      // Explicitly select fast, conversational non-thinking responses.
+      'thinking': {'type': 'disabled'},
+      'temperature': (temperature ?? _defaultTemperature).clamp(0.0, 2.0),
+      'max_tokens': requestedTokens.clamp(1, 8192),
+      'stream': false,
+    };
+  }
+
+  /// Ignore legacy Claude/Gemini model selections that cannot be used at the
+  /// DeepSeek endpoint. Both supported official IDs remain selectable.
+  static String _resolveModel(String? selected, String fallback) {
+    if (selected == 'deepseek-flash' || selected == 'deepseek-v4-pro') {
+      return selected!;
+    }
+    return fallback;
+  }
+
+  static List<Map<String, String>> _formatHistory(
+    List<Map<String, dynamic>> history,
+  ) {
+    final result = <Map<String, String>>[];
+    for (final entry in history) {
+      final content = entry['content'];
+      if (content is! String || content.isEmpty) continue;
+
+      final rawRole = entry['role'];
+      String role;
+      if (rawRole == 'system' || rawRole == 'user' || rawRole == 'assistant') {
+        role = rawRole as String;
+      } else if (entry['isUser'] == false) {
+        role = 'assistant';
+      } else {
+        role = 'user';
+      }
+      result.add({'role': role, 'content': content});
+    }
+    return result;
+  }
+
   static Future<String?> _makeApiRequest(
     Map<String, dynamic> body,
     String debugPrefix,
   ) async {
     try {
-      // Send the request
       final response = await http
           .post(
-            Uri.parse(_openRouterUrl),
+            Uri.parse(_deepSeekUrl),
             headers: {
               'Content-Type': 'application/json; charset=utf-8',
               'Authorization': 'Bearer $_apiKey',
-              'X-Title': 'Afterlife AI',
-              'Accept': 'application/json; charset=utf-8',
+              'Accept': 'application/json',
             },
             body: jsonEncode(body),
           )
           .timeout(_requestTimeout);
 
-      // Check if the request was successful
       if (response.statusCode == 200) {
-        // Explicitly decode response body as UTF-8
-        final responseBody = utf8.decode(response.bodyBytes);
-        final jsonResponse = jsonDecode(responseBody);
-
-        // Add null checks to prevent "The method '[]' was called on null" error
-        if (jsonResponse == null ||
-            jsonResponse['choices'] == null ||
-            jsonResponse['choices'].isEmpty ||
-            jsonResponse['choices'][0] == null ||
-            jsonResponse['choices'][0]['message'] == null) {
-          if (kDebugMode) {
-            print(
-              'Error in $debugPrefix: Invalid response format: $jsonResponse',
-            );
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        if (data is Map<String, dynamic>) {
+          final choices = data['choices'];
+          if (choices is List && choices.isNotEmpty && choices.first is Map) {
+            final choice = choices.first as Map;
+            final reply = choice['message'];
+            if (reply is Map) {
+              final content = reply['content'];
+              if (content is String && content.trim().isNotEmpty) {
+                return content;
+              }
+            }
           }
-          return 'I apologize, I received an invalid response format. Please try again.';
         }
+        return 'Error: DeepSeek returned an empty or unexpected response.';
+      }
 
-        final content = jsonResponse['choices'][0]['message']['content'];
-        return content;
-      } else {
-        if (kDebugMode) {
-          print(
-            'API Error in $debugPrefix: ${response.statusCode}: ${response.body}',
-          );
-        }
-
-        // Handle specific API errors with better user feedback
-        switch (response.statusCode) {
-          case 401:
-            return 'Error: Invalid API key. Please check your OpenRouter API key in Settings.';
-          case 403:
-            return 'Error: API key does not have permission for this request. Please check your OpenRouter account.';
-          case 429:
-            return 'Error: Rate limit exceeded. Please try again in a few moments.';
-          case 500:
-          case 502:
-          case 503:
-            return 'Error: AI service is temporarily unavailable. Please try again later.';
-          default:
-            return 'Error: AI service returned an error (${response.statusCode}). Please try again.';
-        }
-      }
-    } on TimeoutException catch (e) {
       if (kDebugMode) {
-        print('TimeoutException in $debugPrefix: $e');
+        AppLogger.warning(
+          'DeepSeek request $debugPrefix failed (HTTP ${response.statusCode})',
+          tag: 'UnifiedChatService',
+        );
       }
-      return 'I apologize, but my response is taking longer than expected. Please try again in a moment.';
-    } on http.ClientException catch (e) {
+      switch (response.statusCode) {
+        case 400:
+          return 'Error: DeepSeek rejected the request (400). Please check model/settings.';
+        case 401:
+          return 'Error: DeepSeek API key was rejected (401). Check the key in Settings.';
+        case 402:
+          return 'Error: Insufficient DeepSeek account balance (402).';
+        case 403:
+          return 'Error: DeepSeek account is not authorized for this request (403).';
+        case 429:
+          return 'Error: DeepSeek request limit reached (429). Please try again later.';
+        case 500:
+        case 502:
+        case 503:
+        case 504:
+          return 'Error: DeepSeek is temporarily unavailable. Try again later.';
+        default:
+          return 'Error: DeepSeek returned HTTP ${response.statusCode}.';
+      }
+    } on TimeoutException {
+      return 'Error: DeepSeek request timed out. Please try again.';
+    } on http.ClientException {
+      return 'Error: Network connection failed. Check connectivity; Flutter Web may require a backend due to CORS.';
+    } on FormatException {
+      return 'Error: DeepSeek returned invalid JSON.';
+    } catch (e) {
       if (kDebugMode) {
-        print('ClientException in $debugPrefix: $e');
+        AppLogger.error(
+          'DeepSeek request $debugPrefix failed',
+          tag: 'UnifiedChatService',
+          error: e,
+        );
       }
-      return 'It seems there is a network issue. Please check your internet connection.';
-    } on FormatException catch (e) {
-      if (kDebugMode) {
-        print('FormatException in $debugPrefix: $e');
-      }
-      return 'I received an invalid response from the server. Please try again.';
-    } catch (e, s) {
-      if (kDebugMode) {
-        print('Generic Exception in $debugPrefix: $e');
-        print(s);
-      }
-      return 'I apologize, but I encountered an issue connecting to my servers. Please try again in a moment.';
+      return 'Error: AI request failed. Please try again.';
     }
   }
 
-  // Validate API key format (basic check for OpenRouter keys)
-  static bool _isValidApiKeyFormat(String apiKey) {
-    // OpenRouter API keys typically start with 'sk-or-' and are base64-like
-    if (apiKey.length < 10) return false;
-    if (!apiKey.startsWith('sk-or-') && !apiKey.startsWith('sk-')) return false;
-    // Basic pattern check for common API key formats
-    final pattern = RegExp(r'^sk-[A-Za-z0-9_-]+$');
-    return pattern.hasMatch(apiKey);
+  static bool _isValidDeepSeekApiKeyFormat(String apiKey) {
+    final value = apiKey.trim();
+    return value.length >= 10 &&
+        value.startsWith('sk-') &&
+        !value.startsWith('sk-or-') &&
+        !value.contains(RegExp(r'\s'));
   }
 
-  // ========== BACKWARD COMPATIBILITY METHODS ==========
-
-  // General chat compatibility (from providers/chat_service.dart)
+  // Keep existing callers compatible.
   static Future<String?> sendGeneralMessage({
     required String message,
     required List<Map<String, String>> history,
     String? systemPrompt,
     String? model,
   }) async {
-    // Convert List<Map<String, String>> to List<Map<String, dynamic>>
-    final dynamicHistory =
-        history.map((msg) => Map<String, dynamic>.from(msg)).toList();
-
-    return await sendMessage(
+    return sendMessage(
       context: ChatContext.general,
       message: message,
-      history: dynamicHistory,
+      history: history.map((msg) => Map<String, dynamic>.from(msg)).toList(),
       systemPrompt: systemPrompt,
       model: model,
     );
   }
 
-  // Character chat compatibility (from character_chat/chat_service.dart)
   static Future<String?> sendMessageToCharacter({
     required String characterId,
     required String message,
@@ -454,7 +354,7 @@ class UnifiedChatService {
     required List<Map<String, dynamic>> chatHistory,
     String? model,
   }) async {
-    return await sendMessage(
+    return sendMessage(
       context: ChatContext.character,
       characterId: characterId,
       message: message,
@@ -464,7 +364,6 @@ class UnifiedChatService {
     );
   }
 
-  // Interview compatibility (from character_interview/chat_service.dart)
   static Future<String?> sendInterviewMessage({
     required List<Map<String, dynamic>> messages,
     String? systemPrompt,
@@ -472,7 +371,7 @@ class UnifiedChatService {
     double? temperature,
     int? maxTokens,
   }) async {
-    return await sendMessage(
+    return sendMessage(
       context: ChatContext.interview,
       messages: messages,
       systemPrompt: systemPrompt,
@@ -482,17 +381,16 @@ class UnifiedChatService {
     );
   }
 
-  // Method for logging diagnostic info
   static void logDiagnostics() {
-    if (kDebugMode) {
-      AppLogger.debug('=== Unified Chat Service Diagnostics ===', tag: 'UnifiedChatService');
-      AppLogger.debug('Is initialized: $_isInitialized', tag: 'UnifiedChatService');
-      AppLogger.debug('Is using default key: $_isUsingDefaultKey', tag: 'UnifiedChatService');
-      final keyStatus = _apiKey == null ? "NULL" : (_apiKey!.isEmpty ? "EMPTY" : "SET (${_apiKey!.substring(0, min(4, _apiKey!.length))}...)");
-      AppLogger.debug('API key status: $keyStatus', tag: 'UnifiedChatService');
-      AppLogger.debug('=============================', tag: 'UnifiedChatService');
-    }
+    if (!kDebugMode) return;
+    AppLogger.debug(
+      'UnifiedChatService initialized=$_isInitialized; '
+      'hasKey=${_apiKey?.isNotEmpty ?? false}; '
+      'usingDefaultKey=$_isUsingDefaultKey; provider=DeepSeek',
+      tag: 'UnifiedChatService',
+    );
   }
 
+  // Keep old public utility in case another source file uses it.
   static int min(int a, int b) => a < b ? a : b;
 }
