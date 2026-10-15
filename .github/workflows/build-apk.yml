@@ -1,0 +1,49 @@
+name: Build Afterlife Debug APK
+
+on:
+  push:
+    branches:
+      - deepseek-test
+
+permissions:
+  contents: read
+
+jobs:
+  android-debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Create placeholder environment file
+        run: |
+          if [ ! -f .env ]; then
+            printf '%s\n' '# Placeholder only; no API keys' > .env
+          fi
+
+      - name: Download Flutter dependencies
+        run: flutter pub get
+
+      - name: Build Android debug APK
+        run: flutter build apk --debug
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: afterlife-deepseek-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
