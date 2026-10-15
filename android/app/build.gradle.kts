@@ -48,14 +48,16 @@ android {
         proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }
 
-    signingConfigs {
-        create("release") {
-            keyAlias = keystoreProperties["keyAlias"] as String
-            keyPassword = keystoreProperties["keyPassword"] as String
-            storeFile = keystoreProperties["storeFile"]?.let { file(it) }
-            storePassword = keystoreProperties["storePassword"] as？ String
-        }
+    
+signingConfigs {
+    create("release") {
+        keyAlias = keystoreProperties["keyAlias"]?.toString() ?: ""
+        keyPassword = keystoreProperties["keyPassword"]?.toString() ?: ""
+        storeFile = keystoreProperties["storeFile"]?.toString()?.let { file(it) }
+        storePassword = keystoreProperties["storePassword"]?.toString() ?: ""
     }
+}
+
 
     buildTypes {
         release {
