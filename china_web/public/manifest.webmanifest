@@ -1,0 +1,25 @@
+{
+  "name": "Afterlife · 数字分身",
+  "short_name": "Afterlife",
+  "description": "通过 DeepSeek 与 AI 数字人物聊天",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#10152b",
+  "theme_color": "#10152b",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

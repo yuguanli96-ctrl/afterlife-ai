@@ -92,7 +92,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'Read how your data is used and protected';
 
   @override
-  String get customApiKey => 'Custom OpenRouter API Key';
+  String get customApiKey => 'Custom DeepSeek API Key';
 
   @override
   String get customApiKeyDescription => 'Set or update your personal API key';
@@ -506,7 +506,7 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get addCreditToUseAdvancedModels => 'Add \$1-2 credit to use advanced models';
   @override
-  String get openRouterRequiresCredits => 'OpenRouter requires credits to access paid models like GPT-4, Claude, etc. Free models are available without credits.';
+  String get openRouterRequiresCredits => 'DeepSeek API usage is billed by tokens. Check your balance in the DeepSeek platform.';
   @override
   String get localAiModel => 'Local AI Model';
   @override
@@ -538,7 +538,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'API key saved! You can now chat with AI characters.';
   @override
   String get pleaseOpenBrowserVisit =>
-      'Please open your browser and visit: openrouter.ai/keys';
+      'Please open your browser and visit: platform.deepseek.com/api_keys';
 
   @override
   String get diversePerspectives => 'DIVERSE PERSPECTIVES';
@@ -959,18 +959,18 @@ class AppLocalizationsEn extends AppLocalizations {
 
   // API Key Dialog
   @override
-  String get openRouterApiKey => 'OpenRouter API Key';
+  String get openRouterApiKey => 'DeepSeek API Key';
 
   @override
   String get apiKeyRequired => 'API Key Required';
 
   @override
   String get updateApiKeyDescription =>
-      'Update your OpenRouter API key for AI functionality:';
+      'Update your DeepSeek API key for AI functionality:';
 
   @override
   String get apiKeyRequiredDescription =>
-      'The application requires an OpenRouter API key to function. Please enter your API key below:';
+      'The application requires an DeepSeek API key to function. Please enter your API key below:';
 
   @override
   String get enterApiKey => 'Enter API Key (sk-...)';
@@ -980,7 +980,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get getApiKeyFromOpenRouter =>
-      'You can get an API key from openrouter.ai';
+      'You can get an API key from platform.deepseek.com';
 
   @override
   String get usingCustomApiKey => 'Using your custom API key';
@@ -996,7 +996,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get howToGetApiKey => 'How to get your API key:';
 
   @override
-  String get visitOpenRouterAndSignUp => 'Visit openrouter.ai and sign up/login';
+  String get visitOpenRouterAndSignUp => 'Visit platform.deepseek.com and sign up/login';
 
   @override
   String get goToKeysSection => 'Go to "Keys" section in your dashboard';
@@ -1459,7 +1459,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String failedToDeleteModel(String error) => 'Failed to delete model: $error';
 
   @override
-  String get enableCloudAi => 'Enable Cloud AI (OpenRouter)';
+  String get enableCloudAi => 'Enable Cloud AI (DeepSeek)';
   @override
   String get enableCloudAiSubtitle => 'Requires API key in Settings';
   @override
@@ -1467,7 +1467,7 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get openSettingsLink => 'Open Settings';
   @override
-  String get getKeyAtOpenRouter => 'Get a key at openrouter.ai/keys';
+  String get getKeyAtOpenRouter => 'Get a key at platform.deepseek.com/api_keys';
   @override
   String get cloudDisabledNotice => 'Cloud models are optional. Enable Cloud AI and add your own API key in';
 
@@ -1477,7 +1477,7 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get modelClaude45Desc => 'Latest Claude with enhanced reasoning and capabilities.';
   @override
-  String get modelGpt5Desc => 'Long‑context, strong reasoning and coding. Via OpenRouter.';
+  String get modelGpt5Desc => 'Long‑context, strong reasoning and coding. Via DeepSeek.';
   @override
   String get modelGemini25Desc => 'Fast, high‑quality responses with strong multimodal support.';
   @override

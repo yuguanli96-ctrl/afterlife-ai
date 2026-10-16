@@ -592,108 +592,19 @@ class _CharacterProfileScreenState extends State<CharacterProfileScreen> {
   }
 
   Widget _buildModelOptions() {
-    final localizations = AppLocalizations.of(context);
-    // Read current local model size for accurate display
-    final settings = LocalLLMService.getSettings();
-    final mc = settings['modelConfig'] as Map<String, dynamic>?;
-    final String sizeGb = (mc != null && mc['fileSizeGB'] != null)
-        ? mc['fileSizeGB'].toString()
-        : '1.3';
-
-    // Define the models card. On iOS, show Apple Intelligence, and if Cloud AI is enabled, also show two API models.
-    final bool isiOS = Theme.of(context).platform == TargetPlatform.iOS;
-    final models = isiOS
-        ? [
-            {
-              'id': 'local/apple-intelligence',
-              'name': 'Apple Intelligence',
-              'description': 'On-device Apple Foundation Models',
-              'provider': 'Apple (On‑device)',
-              'recommended': true,
-              'isLocal': true,
-            },
-            if (EnvConfig.isCloudAiEnabledCached()) ...[
-              {
-                'id': 'anthropic/claude-sonnet-4.5',
-                'name': 'Claude 4.5 Sonnet',
-                'description': localizations.modelClaude45Desc,
-                'provider': 'Anthropic (Cloud via OpenRouter)',
-                'recommended': false,
-              },
-              {
-                'id': 'openai/gpt-5-chat',
-                'name': 'GPT-5 Chat',
-                'description': localizations.modelGpt5Desc,
-                'provider': 'OpenAI (Cloud via OpenRouter)',
-                'recommended': false,
-              },
-              {
-                'id': 'google/gemini-2.5-pro',
-                'name': 'Gemini 2.5 Pro',
-                'description': localizations.speedMultimodalSupport,
-                'provider': 'Google (Cloud via OpenRouter)',
-                'recommended': false,
-              },
-              {
-                'id': 'deepseek/deepseek-chat-v3.1:free',
-                'name': 'DeepSeek Chat v3.1 (Free)',
-                'description': localizations.modelDeepSeekFreeDesc,
-                'provider': 'DeepSeek (Cloud via OpenRouter)',
-                'free': true,
-                'recommended': false,
-              },
-            ]
-          ]
-        : [
-            // Android keeps existing options
-            {
-              'id': 'local/gemma-3-1b-it',
-              'name': 'Local Gemma 3 1B',
-              'description': AppLocalizations.of(context).downloadGemmaModel,
-              'provider': 'Local Device',
-              'recommended': true,
-              'isLocal': true,
-            },
-            {
-              'id': 'google/gemini-2.5-pro',
-              'name': 'Gemini 2.5 Pro',
-              'description': localizations.speedMultimodalSupport,
-              'provider': 'Google Cloud',
-              'recommended': true,
-            },
-            {
-              'id': 'openai/gpt-5-chat',
-              'name': 'GPT-5 Chat',
-              'description': localizations.modelGpt5Desc,
-              'provider': 'Cloud',
-              'recommended': false,
-            },
-            {
-              'id': 'qwen/qwen3-235b-a22b-07-25:free',
-              'name': 'Qwen 3 235B (Free)',
-              'description': localizations.modelDeepSeekFreeDesc,
-              'provider': 'Cloud',
-              'free': true,
-              'recommended': false,
-            },
-          ];
-
-    return Column(
-      children: [
-        ...models.map(
-          (model) => _buildModelOption(
-            id: model['id'] as String,
-            name: model['name'] as String,
-            description: model['description'] as String,
-            provider: model['provider'] as String,
-            isRecommended: model['recommended'] == true,
-            isFree: model['free'] == true,
-            isLocal: model['isLocal'] == true,
-            isSelected: _character!.model == model['id'],
-          ),
-        ),
-      ],
-    );
+    final models = [
+      {'id':'deepseek-flash', 'name':'DeepSeek Flash', 'description':'快速响应，推荐日常聊天', 'provider':'DeepSeek', 'recommended':true},
+      {'id':'deepseek-v4-pro', 'name':'DeepSeek V4 Pro', 'description':'适合深入对话与复杂任务', 'provider':'DeepSeek', 'recommended':false},
+    ];
+    return Column(children: models.map((model) => _buildModelOption(
+      id: model['id'] as String,
+      name: model['name'] as String,
+      description: model['description'] as String,
+      provider: 'DeepSeek',
+      isRecommended: model['recommended'] == true,
+      isLocal: false,
+      isSelected: _character?.model == model['id'],
+    )).toList());
   }
 
   Widget _buildModelOption({
@@ -2623,42 +2534,8 @@ class _CharacterProfileScreenState extends State<CharacterProfileScreen> {
 
   // Get a user-friendly name for the model
   String _getModelDisplayName(String modelId) {
-    // Look up model information from a map similar to the one in ModelSelectionDialog
-    final Map<String, Map<String, String>> modelInfo = {
-      'local/gemma-3-1b-it': {
-        'name': 'Local Gemma 3 1B',
-        'provider': 'Local Device',
-      },
-      'google/gemini-2.5-pro': {
-        'name': 'Gemini 2.5 Pro',
-        'provider': 'Google',
-      },
-      'anthropic/claude-sonnet-4': {
-        'name': 'Claude 4 Sonnet',
-        'provider': 'Anthropic',
-      },
-      'openai/gpt-5-chat': {'name': 'GPT-5 Chat', 'provider': 'OpenAI'},
-      'qwen/qwen3-235b-a22b-07-25:free': {
-        'name': 'Qwen 3 235B',
-        'provider': 'OpenRouter',
-      },
-    };
-
-    // If we have info for this model, return formatted name
-    if (modelInfo.containsKey(modelId)) {
-      final info = modelInfo[modelId]!;
-      return '${info['name']} by ${info['provider']}';
-    }
-
-    // Fallback to the previous parsing method if model not in our map
-    final parts = modelId.split('/');
-    if (parts.length < 2) return modelId;
-
-    // Get provider and model parts
-    final provider = parts[0].capitalize();
-    final model = parts[1].replaceAll('-', ' ').capitalize();
-
-    return '$model by $provider';
+    if (modelId.startsWith('local/')) return '本地 AI';
+    return modelId == 'deepseek-v4-pro' ? 'DeepSeek V4 Pro' : 'DeepSeek Flash';
   }
 
   // Get a description for the AI model
