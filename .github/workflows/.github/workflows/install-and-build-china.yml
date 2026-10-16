@@ -1,0 +1,121 @@
+name: Install Afterlife China and Build APK
+
+on:
+  push:
+    branches: [deepseek-test]
+    paths:
+      - 'afterlife-china-update.zip'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  install-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Get your Afterlife repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Verify and apply Afterlife China update
+        shell: bash
+        run: |
+          python3 - <<'PYIN'
+          from pathlib import Path
+          from zipfile import ZipFile
+          import hashlib, stat, sys
+          arc = Path('afterlife-china-update.zip')
+          if not arc.is_file():
+              sys.exit('Missing afterlife-china-update.zip. Upload the ZIP to repository root first.')
+          expected = 'fc8c340a59c7a94bf12e59f5d099497876401d4b1d7d4d99610e658ba59036ba'
+          actual = hashlib.sha256(arc.read_bytes()).hexdigest()
+          if actual != expected:
+              sys.exit('ZIP checksum mismatch. Upload the original afterlife-china-update.zip without modifying it.')
+          with ZipFile(arc) as src:
+              items = src.infolist()
+              if len(items) != 36:
+                  sys.exit('Unexpected number of update files')
+              for info in items:
+                  name = info.filename
+                  path = Path(name)
+                  if info.is_dir() or path.is_absolute() or '..' in path.parts or '\\' in name:
+                      sys.exit(f'Unsafe path: {name}')
+                  if stat.S_ISLNK((info.external_attr >> 16) & 0xFFFF):
+                      sys.exit(f'Symlink blocked: {name}')
+                  dest = Path.cwd().joinpath(*path.parts)
+                  dest.parent.mkdir(parents=True, exist_ok=True)
+                  dest.write_bytes(src.read(info))
+          print('Installed Afterlife China update:', len(items), 'files')
+          PYIN
+
+      - name: Save updated sources to deepseek-test (if permitted)
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -f afterlife-china-update.zip
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit.'
+          else
+            git commit -m 'Install Afterlife China edition with DeepSeek'
+            git push origin HEAD:deepseek-test || echo 'WARNING: GitHub did not allow automatic push; the APK may still build, but source changes are not saved remotely.'
+          fi
+
+      - name: Prepare Node.js for Chinese web edition
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Test Chinese web edition
+        run: |
+          node --check china_web/server.mjs
+          node --check china_web/public/app.js
+          node --test china_web/test/*.test.mjs
+
+      - name: Package Chinese web edition
+        run: |
+          cd china_web
+          zip -r ../afterlife-china-web-deploy.zip server.mjs public Dockerfile LICENSE README.md env.example
+
+      - name: Upload web deployment package
+        uses: actions/upload-artifact@v4
+        with:
+          name: afterlife-china-web-deploy
+          path: afterlife-china-web-deploy.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Prepare Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Prepare Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.0'
+          channel: stable
+          cache: true
+
+      - name: Create empty app configuration (no API secrets)
+        run: |
+          test -f .env || printf '%s\n' '# User configures API key inside app' > .env
+
+      - name: Download Flutter dependencies
+        run: flutter pub get
+
+      - name: Compile China Android Debug APK
+        run: flutter build apk --debug
+
+      - name: Upload installable Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: afterlife-china-android-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
