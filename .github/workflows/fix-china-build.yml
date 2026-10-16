@@ -1,0 +1,140 @@
+name: Fix Afterlife China APK Build
+
+on:
+  push:
+    branches: [deepseek-test]
+    paths:
+      - '.github/workflows/fix-china-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  android-china-hotfix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Get project
+        uses: actions/checkout@v4
+
+      - name: Ensure China edition is present
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          import hashlib, sys
+          marker = Path('lib/l10n/translations_zh.dart')
+          if marker.is_file():
+              print('China source files are already in the repository.')
+              sys.exit(0)
+          archive = Path('afterlife-china-update.zip')
+          if not archive.is_file():
+              sys.exit('No China edition source and no afterlife-china-update.zip found.')
+          expected = 'fc8c340a59c7a94bf12e59f5d099497876401d4b1d7d4d99610e658ba59036ba'
+          if hashlib.sha256(archive.read_bytes()).hexdigest() != expected:
+              sys.exit('Original China update ZIP checksum mismatch; stopping safely.')
+          with ZipFile(archive) as z:
+              entries = z.infolist()
+              if len(entries) != 36:
+                  sys.exit('Unexpected update ZIP contents')
+              for entry in entries:
+                  name = entry.filename
+                  path = Path(name)
+                  if entry.is_dir() or path.is_absolute() or '..' in path.parts or '\\' in name:
+                      sys.exit('Unsafe ZIP path')
+                  dest = Path.cwd() / path
+                  dest.parent.mkdir(parents=True, exist_ok=True)
+                  dest.write_bytes(z.read(entry))
+          print('Applied China update from verified ZIP.')
+          PY
+
+      - name: Repair confirmed Dart compilation issues
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, sys
+
+          profile = Path('lib/features/character_profile/character_profile_screen.dart')
+          original = profile.read_text(encoding='utf-8')
+          old = "isSelected: _selectedModel == model['id'],"
+          replacement = "isSelected: _character?.model == model['id'],"
+          count = original.count(old)
+          if count > 1:
+              sys.exit('Unexpected duplicate model selection expressions')
+          if count == 1:
+              profile.write_text(original.replace(old, replacement), encoding='utf-8')
+              print('Fixed undefined _selectedModel in character profile')
+          elif replacement not in original:
+              sys.exit('Character profile code differs from expected China patch')
+
+          english = Path('lib/l10n/translations_en.dart')
+          source = english.read_text(encoding='utf-8')
+          renames = {
+              'getApiKeyFromDeepSeek': 'getApiKeyFromOpenRouter',
+              'visitDeepSeekAndSignUp': 'visitOpenRouterAndSignUp',
+              'getKeyAtDeepSeek': 'getKeyAtOpenRouter',
+          }
+          for wrong, correct in renames.items():
+              if re.search(r'\bString\s+get\s+' + wrong + r'\b', source):
+                  source = re.sub(r'(\bString\s+get\s+)' + wrong + r'\b',
+                                  lambda match: match.group(1) + correct, source)
+                  print('Restored API-compatible getter:', correct)
+              elif not re.search(r'\bString\s+get\s+' + correct + r'\b', source):
+                  sys.exit('Localization getter not found: ' + correct)
+          english.write_text(source, encoding='utf-8')
+
+          base = Path('lib/l10n/app_localizations.dart').read_text(encoding='utf-8')
+          required = set(re.findall(r'\bString\s+get\s+(\w+)', base))
+          provided = set(re.findall(r'\bString\s+get\s+(\w+)', source))
+          missing = sorted(required - provided)
+          if missing:
+              sys.exit('English localization missing getters: ' + ', '.join(missing))
+          print('All English localization getters now match the base interface.')
+          PY
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.0'
+          channel: stable
+          cache: true
+
+      - name: Create empty app configuration
+        run: test -f .env || printf '%s\n' '# No API secrets bundled' > .env
+
+      - name: Fetch Flutter packages
+        run: flutter pub get
+
+      - name: Build repaired China APK
+        run: flutter build apk --debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: afterlife-china-fixed-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Save repaired source to deepseek-test
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib/features/character_profile/character_profile_screen.dart lib/l10n/translations_en.dart
+          git add -A lib/l10n/translations_zh.dart china_web README-CHINA.md 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo 'No pending source fixes to commit.'
+          else
+            git commit -m 'Fix China edition Flutter compilation'
+            git push origin HEAD:deepseek-test || echo 'Source push denied; APK artifact is still available.'
+          fi
